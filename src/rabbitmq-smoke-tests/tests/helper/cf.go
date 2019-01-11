@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/cloudfoundry-incubator/cf-test-helpers/cf"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gbytes"
 	"github.com/onsi/gomega/gexec"
 )
 
@@ -92,10 +94,37 @@ func PrintAppLogs(appName string) {
 	Expect(Cf("logs", appName, "--recent")).To(gexec.Exit(0))
 }
 
-func RetrieveMetrics(serviceName string) string {
+func RetrieveMetricsFromLogCache(serviceName string) string {
 	session := Cf("tail", "--lines", "1", serviceName)
 	Expect(session).To(gexec.Exit(0))
 	return string(session.Buffer().Contents())
+}
+
+func RetrieveMetricsFromFirehose(serviceName string) string {
+	timeout := 10 * time.Second
+	cmd := exec.Command("cf", "nozzle", "-filter", "ValueMetric")
+
+	outBuf := gbytes.NewBuffer()
+	errBuf := gbytes.NewBuffer()
+
+	session, err := gexec.Start(cmd, outBuf, errBuf)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("Session started")
+
+	select {
+	case <-session.Exited:
+	case <-time.After(timeout):
+		fmt.Println("Session timed out.. killing process: ", session.Command.Process.Pid)
+		killed := session.Kill()
+		fmt.Println("Signal sent")
+		killed.Wait()
+		fmt.Println("Session killed")
+	}
+	return ""
+	// return string(outBuf.Contents())
 }
 
 func CreateService(serviceOffering, servicePlan, serviceName string) {
